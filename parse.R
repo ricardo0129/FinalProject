@@ -18,25 +18,28 @@ kaplan_meier_curve <- function(cancer, ith) {
   colnames(data) <- col
   median <- apply(data, 1, median, na.rm = TRUE)
   clinical <- subset(clinical, clinical$submitter_id %in% col)
-
+  print(clinical)
   clinical$deceased <- ifelse(clinical$vital_status == "Alive", FALSE, TRUE)
   clinical$overall_survival <- ifelse(clinical$vital_status == "Alive",
                                           clinical$days_to_last_follow_up,
                                           clinical$days_to_death)
+
+  clinical$overall_survival <- sapply(clinical$overall_survival, function(x) { as.integer(x/30) } )
   data <- t(data)
   data <- cbind.data.frame(rownames(data), as.numeric(data[, 1]))
   rownames(data) <- 1:nrow(data)
   colnames(data) <- c("submitter_id", "ith")
   clinical <- merge(clinical, data, by = "submitter_id", all.x = TRUE)
   clinical$ith <- ifelse(clinical$ith > median, 1, 2)
-  print(head(clinical))
   fit <- surv_fit(Surv(overall_survival, deceased) ~ ith, data = clinical)
+  res <- surv_pvalue(fit, data = clinical, method="survdiff")
+  print(res)
   ggsurvplot(fit,
-            pval = TRUE, conf.int = FALSE,
+            pval = res$pval, conf.int = FALSE,
             risk.table = TRUE,
             risk.table.col = "strata",
             linetype = "strata",
             palette = c("#e77700", "#06b0f3"))
 }
 
-kaplan_meier_curve("ACC", "./test.csv")
+kaplan_meier_curve("ACC", "./ACC_ITH_VALUES.csv")

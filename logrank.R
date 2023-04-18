@@ -1,21 +1,18 @@
-library("survival")
-library("survminer")
-library("Rcpp")
+library(CancerRxGene)
+library(tidyverse)
 
-data("lung")
-lung$test<- ifelse(lung$age<64, 1, 2)
-fit <- survfit(Surv(time, status) ~ sex, data = lung)
-print(lung$time)
-print(lung$status)
-print(fit)
-summary(fit)$table
-ggsurvplot(fit,
-           pval = TRUE, conf.int = TRUE,
-           risk.table = TRUE, # Add risk table
-           risk.table.col = "strata", # Change risk table color by groups
-           linetype = "strata", # Change line type by groups
-           surv.median.line = "hv", # Specify median survival
-           ggtheme = theme_bw(), # Change ggplot2 theme
-           palette = c("#E7B800", "#2E9FDF"))
-surv_diff <- survdiff(Surv(time, status) ~ sex, data = lung)
-surv_diff
+# Define list of cell lines to download
+cell_lines <- c("A549", "MCF7", "PC3")
+
+# Download gene expression data for the specified cell lines
+gene_expr <- rx_get_genomic_profiles(cell_lines, genomic_data_type = "gene_expression")
+
+# Transpose the data and set cell line names as column names
+gene_expr_t <- gene_expr %>%
+  select(-c(Gene_symbol, Entrez_gene_id)) %>%
+  t() %>%
+  as.data.frame() %>%
+  setNames(cell_lines)
+
+# Save the data to a CSV file
+write_csv(gene_expr_t, "gene_expression.csv")
