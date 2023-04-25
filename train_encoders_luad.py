@@ -1,6 +1,9 @@
 import pandas as pd
 import numpy as np
 
+pd.set_option("display.max_rows", None)
+pd.set_option("display.max_colwidth", None)
+
 def depth2(data):
     #input is a pandas data frame with gene expression values
     dt = data.T
@@ -64,8 +67,12 @@ def get_expression_matrices(sample_sheet_path, expression_directory):
     return (tpm, fpkm, fpkm_uq)
 
 #### Below is the variable code by type:
-sample_sheet = "/a/buffalo.cs.fiu.edu./disk/jccl-001/homes/seber007/final_project/data/luad/gdc_sample_sheet.2023-04-24.tsv"
-data_path = "/a/buffalo.cs.fiu.edu./disk/jccl-001/homes/seber007/final_project/data/luad/"
+#sample_sheet = "/a/buffalo.cs.fiu.edu./disk/jccl-001/homes/seber007/final_project/data/luad/gdc_sample_sheet.2023-04-24.tsv"
+#data_path = "/a/buffalo.cs.fiu.edu./disk/jccl-001/homes/seber007/final_project/data/luad/"
+
+
+sample_sheet = r"C:\Users\saebert\Downloads\gdc_sample_sheet.2023-04-17.tsv"
+data_path = r"C:\Users\saebert\Downloads\gdc_download_20230418_013130.187133"
 
 data = get_expression_matrices(sample_sheet, data_path)
 
@@ -143,6 +150,9 @@ for fold in folds:
     train_set = fold[0]
     test_set = fold[1]
 
+    train_set_ix = train_set.index
+    test_set_ix = test_set.index
+
     # the depth scores, used as labels to the supervised concrete autoencoder
     train_labels = train_set.iloc[:, -1]
     test_labels = test_set.iloc[:, -1]
@@ -212,14 +222,18 @@ for fold in folds:
         final_test_loss = model.evaluate(test_set, test_labels)
         final_train_loss = model.evaluate(train_set, train_labels)
 
-        output_file_name = f"/a/buffalo.cs.fiu.edu./disk/jccl-001/homes/seber007/final_project/outputs/{cancer}_supervised_{gene_count}_genes_fold_{fold_count}.txt"
+        output_file_name = f"output_{cancer}_supervised_{gene_count}_genes_fold_{fold_count}.txt"
 
         with open(output_file_name, "w+") as supervised_output_file:
             supervised_output_file.write("patient ids (train):\n")
-            supervised_output_file.write(f"{train_set.index}\n")
+            for patient_id in train_set_ix:
+                supervised_output_file.write(f"{patient_id},")
+            supervised_output_file.write("\n")
 
             supervised_output_file.write("patient ids (test):\n")
-            supervised_output_file.write(f"{test_set.index}\n")
+            for patient_id in test_set_ix:
+                supervised_output_file.write(f"{patient_id},")
+            supervised_output_file.write("\n")
 
             supervised_output_file.write("selected gene names:\n")
             supervised_output_file.write(f"{selected_gene_names}\n")
@@ -259,14 +273,17 @@ for fold in folds:
         final_test_loss = model.evaluate(test_set, test_set)
         final_train_loss = model.evaluate(train_set, train_set)
 
-        output_file_name = f"/a/buffalo.cs.fiu.edu./disk/jccl-001/homes/seber007/final_project/outputs/{cancer}_unsupervised_{gene_count}_genes_fold_{fold_count}.txt"
+        output_file_name = f"output_{cancer}_unsupervised_{gene_count}_genes_fold_{fold_count}.txt"
 
         with open(output_file_name, "w+") as unsupervised_output_file:
-            unsupervised_output_file.write("patient ids (train):\n")
-            unsupervised_output_file.write(f"{train_set.index}\n")
+            for patient_id in train_set_ix:
+                unsupervised_output_file.write(f"{patient_id},")
+            unsupervised_output_file.write("\n")
 
             unsupervised_output_file.write("patient ids (test):\n")
-            unsupervised_output_file.write(f"{test_set.index}\n")
+            for patient_id in test_set_ix:
+                unsupervised_output_file.write(f"{patient_id},")
+            unsupervised_output_file.write("\n")
 
             unsupervised_output_file.write("selected gene names:\n")
             unsupervised_output_file.write(f"{selected_gene_names}\n")
