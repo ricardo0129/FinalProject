@@ -1,8 +1,17 @@
 import pandas as pd
 import numpy as np
+import os
+from sklearn.model_selection import StratifiedKFold
+from concrete_autoencoder import ConcreteAutoencoderFeatureSelector
+from keras.layers import Dense, Dropout, LeakyReLU
+import numpy as np
 
-pd.set_option("display.max_rows", None)
-pd.set_option("display.max_colwidth", None)
+import keras
+import tensorflow as tf
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+
+gpus = tf.config.list_physical_devices('GPU')
+tf.config.set_visible_devices(gpus[1:], 'GPU')
 
 def depth2(data):
     #input is a pandas data frame with gene expression values
@@ -66,13 +75,25 @@ def get_expression_matrices(sample_sheet_path, expression_directory):
 
     return (tpm, fpkm, fpkm_uq)
 
+# def survival_subset(gene_expression, important_genes, file_name):
+#     copied_expression = gene_expression.copy()
+#     reduced = copied_expression.loc[:, ~(gene_expression == 'Solid Tissue Normal').any()]
+#     reduced = reduced.drop([19962])
+#     reduced.set_index('gene_name', inplace=True)
+#     subset_df = reduced[reduced.index.isin(important_genes)]
+#     gene_save = depth2(subset_df).to_frame().T
+#     gene_save.to_csv(file_name, index=False)
+
 #### Below is the variable code by type:
-#sample_sheet = "/a/buffalo.cs.fiu.edu./disk/jccl-001/homes/seber007/final_project/data/luad/gdc_sample_sheet.2023-04-24.tsv"
-#data_path = "/a/buffalo.cs.fiu.edu./disk/jccl-001/homes/seber007/final_project/data/luad/"
 
+# TODO replace with a function instead of enumerating each cancer
 
-sample_sheet = r"C:\Users\saebert\Downloads\gdc_sample_sheet.2023-04-17.tsv"
-data_path = r"C:\Users\saebert\Downloads\gdc_download_20230418_013130.187133"
+## BEGIN KIRC
+print("Starting KIRC\ns")
+cancer = "kirc"
+
+sample_sheet = "/a/buffalo.cs.fiu.edu./disk/jccl-001/homes/seber007/final_project/data/kirc/gdc_sample_sheet.2023-04-24.tsv"
+data_path = "/a/buffalo.cs.fiu.edu./disk/jccl-001/homes/seber007/final_project/data/kirc/"
 
 data = get_expression_matrices(sample_sheet, data_path)
 
@@ -105,23 +126,20 @@ fpkm_with_depth["gene_name"] = gene_names
 # add back the sample types row
 fpkm_with_depth.loc[len(fpkm_with_depth)] = sample_types
 
-
-
-# remove gene names (TODO consider cleaning up/simplifying this later)
+# remove gene names (TODO restructure)
 gene_names = fpkm_with_depth["gene_name"]
 fpkm_with_depth = fpkm_with_depth.drop("gene_name", axis=1)
 
 # split into 10 folds for cross-validation, and train/test both autoencoders on each fold 
-# todo: decide what we need to record here (maybe we just need to save the selected genes and their train/test loss in each fold? then run depth on them later with those genes and compare to the preivous depth?)
-
 
 data_and_depth = fpkm_with_depth.iloc[:-1,:] # the expressions, and the "real" depth score for each
 tumor_types = fpkm_with_depth.iloc[-1,:] # tumor types (either normal or tumor; for the stratified CV)
 
 data_and_depth = data_and_depth.T # transpose since sklearn expects rows as samples and columns as features
 
-from sklearn.model_selection import StratifiedKFold
-skf = StratifiedKFold(n_splits=10)
+data_and_depth_2 = fpkm_with_depth.copy()
+
+skf = StratifiedKFold(n_splits=3)
 splits = skf.split(data_and_depth, tumor_types)
 
 folds = []
@@ -133,19 +151,21 @@ for _, (train_indices, test_indices) in enumerate(splits):
     train_set = copied_data.iloc[train_indices]
     test_set = copied_data.iloc[test_indices]
 
-    folds.append((train_set, test_set, train_indices, test_indices)) # todo: we may not need the indices, but they may be useful for logging
+    full_df = fpkm_with_depth.T.copy()
 
+    train_set_2 = full_df.iloc[train_indices].T
+    test_set_2 = full_df.iloc[test_indices].T
 
-from concrete_autoencoder import ConcreteAutoencoderFeatureSelector
-from keras.layers import Dense, Dropout, LeakyReLU
-import numpy as np
+    folds.append((train_set, test_set, train_indices, test_indices, train_set_2, test_set_2)) # todo: we may not need the indices, but they may be useful for logging
 
-gene_counts_to_test = [100]#, 200] # TODO add more later
+gene_counts_to_test = [500]
 
 gene_names_list = list(gene_names)
 
 fold_count = 0
 for fold in folds:
+    full_data_train = fold[4].copy()
+    full_data_test = fold[5].copy()
 
     train_set = fold[0]
     test_set = fold[1]
@@ -191,13 +211,9 @@ for fold in folds:
             x = Dense(1)(x) #predict only the depth score
             return x
 
-        # TODO more reasonable epoch counts
-        selector_unsupervised = ConcreteAutoencoderFeatureSelector(K = gene_count, output_function = unsupervised_output, num_epochs = 10, learning_rate=0.002, start_temp=10, min_temp=0.1, tryout_limit=1)
-        selector_supervised = ConcreteAutoencoderFeatureSelector(K = gene_count, output_function = supervised_output, num_epochs = 10, learning_rate=0.002, start_temp=10, min_temp=0.1, tryout_limit=1)
+        selector_unsupervised = ConcreteAutoencoderFeatureSelector(K = gene_count, output_function = unsupervised_output, num_epochs = 3000, learning_rate=0.002, start_temp=10, min_temp=0.1, tryout_limit=1)
+        selector_supervised = ConcreteAutoencoderFeatureSelector(K = gene_count, output_function = supervised_output, num_epochs = 3000, learning_rate=0.002, start_temp=10, min_temp=0.1, tryout_limit=1)
 
-        # the logging "should" give us everything we need
-
-        print(f"Training supervised selector on fold:{fold_count} for {gene_count} genes")
         selector_supervised.fit(train_set, train_labels, test_set, test_labels)
 
         selected_indices = selector_supervised.get_indices()
@@ -206,23 +222,14 @@ for fold in folds:
         for index in selected_indices:
             selected_gene_names.append(gene_names_list[index])
 
-        # write to a file
-        # * selected gene names
-        # * selected indices
-        # * final train loss
-        # * final test loss
-        # * sample ids
-
-        # then we can do any analysis we like later with this data
-
-        cancer = "luad"
-
         model = selector_supervised.get_params()
 
         final_test_loss = model.evaluate(test_set, test_labels)
         final_train_loss = model.evaluate(train_set, train_labels)
 
-        output_file_name = f"output_{cancer}_supervised_{gene_count}_genes_fold_{fold_count}.txt"
+        output_file_name = f"/a/buffalo.cs.fiu.edu./disk/jccl-001/homes/seber007/final_project/outputs/{cancer}_supervised_{gene_count}_genes_fold_{fold_count}.txt"
+        csv_output_file_name_train = f"/a/buffalo.cs.fiu.edu./disk/jccl-001/homes/seber007/final_project/outputs/{cancer}_supervised_{gene_count}_sub_depth_fold_{fold_count}_train.csv"
+        csv_output_file_name_test = f"/a/buffalo.cs.fiu.edu./disk/jccl-001/homes/seber007/final_project/outputs/{cancer}_supervised_{gene_count}_sub_depth_fold_{fold_count}_test.csv"
 
         with open(output_file_name, "w+") as supervised_output_file:
             supervised_output_file.write("patient ids (train):\n")
@@ -235,6 +242,7 @@ for fold in folds:
                 supervised_output_file.write(f"{patient_id},")
             supervised_output_file.write("\n")
 
+
             supervised_output_file.write("selected gene names:\n")
             supervised_output_file.write(f"{selected_gene_names}\n")
 
@@ -246,6 +254,7 @@ for fold in folds:
 
             supervised_output_file.write("final test loss:\n")
             supervised_output_file.write(f"{final_test_loss}\n")
+
         print(f"Finished training supervised selector on fold:{fold_count} for {gene_count} genes")
 
         print(f"Training unsupervised selector on fold: {fold_count} for {gene_count} genes")
@@ -257,23 +266,15 @@ for fold in folds:
         for index in selected_indices:
             selected_gene_names.append(gene_names_list[index])
 
-        # write to a file
-        # * selected gene names
-        # * selected indices
-        # * final train loss
-        # * final test loss
-        # * sample ids
-
-        # then we can do any analysis we like later with this data
-
-        cancer = "luad"
-
         model = selector_unsupervised.get_params()
 
         final_test_loss = model.evaluate(test_set, test_set)
         final_train_loss = model.evaluate(train_set, train_set)
 
-        output_file_name = f"output_{cancer}_unsupervised_{gene_count}_genes_fold_{fold_count}.txt"
+        output_file_name = f"/a/buffalo.cs.fiu.edu./disk/jccl-001/homes/seber007/final_project/outputs/{cancer}_unsupervised_{gene_count}_genes_fold_{fold_count}.txt"
+        csv_output_file_name_train = f"/a/buffalo.cs.fiu.edu./disk/jccl-001/homes/seber007/final_project/outputs/{cancer}_unsupervised_{gene_count}_sub_depth_fold_{fold_count}_train.csv"
+        csv_output_file_name_test = f"/a/buffalo.cs.fiu.edu./disk/jccl-001/homes/seber007/final_project/outputs/{cancer}_unsupervised_{gene_count}_sub_depth_fold_{fold_count}_test.csv"
+
 
         with open(output_file_name, "w+") as unsupervised_output_file:
             for patient_id in train_set_ix:
@@ -296,7 +297,10 @@ for fold in folds:
 
             unsupervised_output_file.write("final test loss:\n")
             unsupervised_output_file.write(f"{final_test_loss}\n")
+
         print(f"Finished training unsupervised selector on fold:{fold_count} for {gene_count} genes")
-
-
         fold_count += 1
+
+print("finished KIRC\n")
+## end KIRC
+
